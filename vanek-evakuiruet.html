@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>[hidden]{display:none!important}body{margin:0}</style>
+<title>Ванёк эвакуирует</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Rubik:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-screen canvas city (camera follows the truck), HUD bar on top, hint + touch controls at bottom, overlay card between levels. One fixed look by design. */
+:root{
+  --panel:rgba(22,26,34,.86); --ink:#f3f1ea; --muted:#a7adb8;
+  --amber:#f2a516; --red:#e8414b; --green:#3ccf7e; --asphalt:#3d4149;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Rubik",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:#2c3038;color:var(--ink);font-family:var(--body);overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#wrap{position:relative;height:100%;width:100%}
+canvas{display:block;width:100%;height:100%}
+
+.hud{position:absolute;top:10px;left:0;right:0;display:flex;justify-content:space-between;gap:10px;align-items:flex-start;
+  padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));pointer-events:none}
+.box{background:var(--panel);border-radius:12px;padding:8px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.lvl{font-family:var(--display);font-weight:800;font-size:.95rem;letter-spacing:.04em;color:var(--amber)}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:.8rem;color:var(--muted)}
+.dot{width:14px;height:14px;border-radius:4px;display:inline-grid;place-items:center;font-size:10px;font-weight:600;color:#14171c}
+.dot.p{background:var(--red)} .dot.t{background:var(--green)} .dot.e{background:#5d6470;color:var(--ink)}
+.need{font-size:.8rem;color:var(--ink)}
+.need b{font-variant-numeric:tabular-nums}
+.box.r{align-items:flex-end;text-align:right}
+.box.r .big{font-family:var(--display);font-weight:600;font-size:.9rem}
+.box.r span{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+
+.bottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));
+  padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));pointer-events:none}
+.hint{background:var(--panel);border-radius:999px;padding:8px 16px;font-size:.9rem;text-align:center;max-width:100%;text-wrap:balance}
+.hint.warn{background:var(--red);color:#fff}
+.hint.ok{background:var(--green);color:#10261a}
+
+.pad{display:none;width:100%;max-width:520px;justify-content:space-between;align-items:flex-end;gap:8px;pointer-events:auto}
+body.touch .pad{display:flex}
+.grp{display:flex;gap:8px}
+.k{width:62px;height:62px;border-radius:16px;border:0;background:rgba(22,26,34,.78);color:var(--ink);font-size:1.5rem;display:grid;place-items:center;touch-action:none}
+.k.on{background:var(--amber);color:#1b1d22}
+.k.act{width:84px;height:84px;border-radius:50%;background:var(--red);color:#fff;font-family:var(--display);font-size:.62rem;font-weight:800;letter-spacing:.04em;line-height:1.2;text-align:center}
+.k.act.on{background:#ff6b73}
+.pedals{display:flex;gap:10px;align-items:flex-end}
+.k.pedal{border-radius:10px 10px 14px 14px;color:#d9dbe0;font-family:var(--display);font-size:.55rem;font-weight:600;letter-spacing:.06em;
+  align-content:end;padding-bottom:8px;border:2px solid #4a505c;
+  background:repeating-linear-gradient(180deg,#3a3f4a 0 7px,#262a33 7px 11px);box-shadow:0 5px 0 #15181e;transition:transform .05s,box-shadow .05s}
+.k.brake{width:84px;height:70px}
+.k.gas{width:58px;height:112px}
+.k.pedal.on{transform:translateY(4px) scaleY(.96);box-shadow:0 1px 0 #15181e;border-color:var(--amber);color:var(--amber);background:repeating-linear-gradient(180deg,#4a4230 0 7px,#2d2a22 7px 11px)}
+.k.brake.on{border-color:var(--red);color:#ff8a90;background:repeating-linear-gradient(180deg,#4a3034 0 7px,#2d2225 7px 11px)}
+
+.overlay{position:absolute;inset:0;touch-action:pan-y;display:grid;place-items:center;background:rgba(18,21,28,.7);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));overflow:auto}
+.card{max-width:420px;width:100%;background:#1d2129;border-radius:18px;padding:26px 22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.card h1{font-family:var(--display);font-weight:800;font-size:clamp(1.7rem,8vw,2.3rem);margin:0;color:var(--amber);letter-spacing:.02em;text-wrap:balance}
+.card h1.bad{color:var(--red)} .card h1.good{color:var(--green)}
+.card p{margin:0;line-height:1.5}
+.rules{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;font-size:.92rem;line-height:1.4;color:#d9dbe0}
+.rules li{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}
+.kbd{font-family:var(--display);font-size:.6rem;font-weight:600;background:#323845;border-radius:6px;padding:4px 0;text-align:center;color:var(--amber)}
+.btns{display:flex;gap:10px;flex-wrap:wrap}
+button.main{font-family:var(--display);font-weight:600;font-size:.95rem;border:0;border-radius:12px;padding:14px 22px;cursor:pointer;background:var(--amber);color:#1b1d22;flex:1 1 auto}
+button.sec{background:#323845;color:var(--ink)}
+button.main:focus-visible,.k:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.small{font-size:.8rem;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="c"></canvas>
+
+  <div class="hud">
+    <div class="box">
+      <div class="lvl" id="lvl">УРОВЕНЬ 1</div>
+      <div class="row" id="dots"></div>
+      <div class="need" id="need">Эвакуировать: <b>0 / 3</b></div>
+    </div>
+    <div class="box r">
+      <div class="big" id="best">1</div>
+      <span>лучший уровень</span>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="hint" id="hint">Найди машину с красной подсветкой</div>
+    <div class="pad">
+      <div class="grp">
+        <button class="k" data-k="left" aria-label="Руль влево">◀</button>
+        <button class="k" data-k="right" aria-label="Руль вправо">▶</button>
+      </div>
+      <button class="k act" data-k="act">ЭВАКУ-<br>АЦИЯ</button>
+      <div class="pedals">
+        <button class="k pedal brake" data-k="down" aria-label="Тормоз, а если держать стоя — задний ход">ТОРМОЗ<br>НАЗАД</button>
+        <button class="k pedal gas" data-k="up" aria-label="Газ">ГАЗ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="ov">
+    <div class="card">
+      <h1 id="ovTitle">ВАНЁК ЭВАКУИРУЕТ</h1>
+      <div id="ovBody">
+        <ul class="rules">
+          <li><span class="kbd">↑↓</span><span>Газ, тормоз и задний ход</span></li>
+          <li><span class="kbd">←→</span><span>Руль. Поворачивает только в движении, как настоящая машина</span></li>
+          <li><span class="kbd">SPACE</span><span>Подъедь задом к машине с красной подсветкой, остановись и держи 5 секунд</span></li>
+          <li><span class="kbd">➜</span><span>Отвези её на штрафстоянку, туда ведёт зелёная стрелка</span></li>
+          <li><span class="kbd">!</span><span>Со второго уровня владелец может выбежать к машине. Успеет добежать, пока идёт погрузка, — уедет</span></li>
+        </ul>
+      </div>
+      <div class="btns" id="ovBtns"></div>
+      <p class="small" id="ovSmall">На телефоне появятся экранные кнопки.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+
+/* ---------- город ---------- */
+const VX=[150,650,1150,1650], HY=[150,650,1150], RW=60, SW=22, WW=1800, WH=1300;
+const LOAD_TIME = 5;
+const walls = [[0,0,WW,68],[0,WH-68,WW,68],[0,0,68,WH],[WW-68,0,68,WH]];
+const blocks = [];
+const ROOFS = ['#c8b99c','#a9b4c0','#b9a5a1','#a3b39b','#c7ae88','#b4aec4'];
+for (let i=0;i<VX.length-1;i++) for (let j=0;j<HY.length-1;j++){
+  const b = {x:VX[i]+RW, y:HY[j]+RW, w:VX[i+1]-VX[i]-2*RW, h:HY[j+1]-HY[j]-2*RW, i, j};
+  b.in = {x:b.x+SW, y:b.y+SW, w:b.w-2*SW, h:b.h-2*SW};
+  b.kind = (i===0&&j===0) ? 'yard' : (i===1&&j===1) ? 'park' : 'house';
+  blocks.push(b);
+}
+// дома: внутренний прямоугольник квартала — сплошной; рисуем его как несколько крыш
+for (const b of blocks){
+  if (b.kind==='yard') continue;
+  walls.push([b.in.x,b.in.y,b.in.w,b.in.h]);
+  if (b.kind==='house'){
+    const h2 = b.in.h/2, w2 = b.in.w/2, split = (b.i+b.j)%2;
+    b.roofs = split
+      ? [[0,0,w2-4,b.in.h],[w2+4,0,w2-4,h2-4],[w2+4,h2+4,w2-4,h2-4]]
+      : [[0,0,b.in.w,h2-4],[0,h2+4,w2-4,h2-4],[w2+4,h2+4,w2-4,h2-4]];
+    b.roofs = b.roofs.map((r,k) => ({x:b.in.x+r[0],y:b.in.y+r[1],w:r[2],h:r[3],c:ROOFS[(b.i*3+b.j*2+k)%ROOFS.length]}));
+  } else {
+    b.trees = [];
+    for (let k=0;k<26;k++) b.trees.push({x:b.in.x+20+Math.random()*(b.in.w-40), y:b.in.y+20+Math.random()*(b.in.h-40), r:12+Math.random()*12});
+  }
+}
+// штрафстоянка: забор с воротами справа
+const Y = blocks.find(b=>b.kind==='yard').in;
+const GATE=[Y.y+95, Y.y+Y.h-95], FT=6;
+walls.push([Y.x,Y.y,Y.w,FT],[Y.x,Y.y+Y.h-FT,Y.w,FT],[Y.x,Y.y,FT,Y.h],
+           [Y.x+Y.w-FT,Y.y,FT,GATE[0]-Y.y],[Y.x+Y.w-FT,GATE[1],FT,Y.y+Y.h-GATE[1]]);
+const yardSlots = [];
+for (let k=0;k<6;k++){ yardSlots.push({x:Y.x+38+k*44, y:Y.y+40, h:Math.PI/2}); yardSlots.push({x:Y.x+38+k*44, y:Y.y+Y.h-40, h:Math.PI/2}); }
+
+// участки дорог между перекрёстками
+const segs = [];
+for (const x of VX) for (let j=0;j<HY.length-1;j++) segs.push({o:'v', c:x, a0:HY[j]+RW, a1:HY[j+1]-RW});
+for (const y of HY) for (let i=0;i<VX.length-1;i++) segs.push({o:'h', c:y, a0:VX[i]+RW, a1:VX[i+1]-RW});
+function spotPos(seg, side, t, off){
+  return seg.o==='v' ? {x:seg.c+side*off, y:t, h:Math.PI/2} : {x:t, y:seg.c+side*off, h:0};
+}
+function curbTs(seg){
+  const L = seg.a1-seg.a0, n = Math.floor((L-128)/70)+1, start = seg.a0 + (L-(n-1)*70)/2;
+  return Array.from({length:n}, (_,k) => start+k*70);
+}
+
+/* ---------- состояние ---------- */
+const CAR_COLORS = ['#e8e4dc','#2f6fb5','#1f2328','#8c949f','#3d8a5a','#c9c2a5','#6a4c93','#2b9bb0','#d07a2c'];
+let S, best = 1, saved = 1;
+try { best = +localStorage.getItem('evak-best') || 1; saved = +localStorage.getItem('evak-level') || 1; } catch(e){}
+$('best').textContent = best;
+
+function levelCfg(n){
+  const total = Math.min(2+n, 10);
+  return { total, need: n<=2 ? total : total-1, ownerChance: n===1 ? 0 : Math.min(.75, .3+.1*(n-2)) };
+}
+
+function carCircles(c){
+  const dx=Math.cos(c.h)*13, dy=Math.sin(c.h)*13;
+  return [{x:c.x+dx,y:c.y+dy,r:12},{x:c.x-dx,y:c.y-dy,r:12}];
+}
+function overlaps(a, list){
+  const ca = carCircles(a);
+  for (const b of list) for (const p of ca) for (const q of carCircles(b)) if (Math.hypot(p.x-q.x,p.y-q.y) < 27) return true;
+  return false;
+}
+const shuffle = a => { for (let i=a.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [a[i],a[j]]=[a[j],a[i]]; } return a; };
+const pick = a => a[Math.random()*a.length|0];
+
+function genLevel(n){
+  const cfg = levelCfg(n);
+  const cars = [], signs = [], used = new Set();
+  const spawn = {x:Y.x+Y.w/2-20, y:Y.y+Y.h/2};
+  const banned = p => Math.hypot(p.x-(Y.x+Y.w+60), p.y-(Y.y+Y.h/2)) < 130 || Math.hypot(p.x-spawn.x,p.y-spawn.y) < 200;
+  const LABELS = {cross:'на переходе', walk:'на тротуаре', dbl:'вторым рядом', sign:'под знаком'};
+  let guard = 0;
+  while (cars.filter(c=>c.viol).length < cfg.total && guard++ < 2000){
+    const seg = pick(segs), side = Math.random()<.5?-1:1, type = pick(['cross','walk','dbl','sign','cross','sign']);
+    let t, off, key;
+    if (type==='cross'){ t = Math.random()<.5 ? seg.a0+12 : seg.a1-12; off = 46; key = segs.indexOf(seg)+':'+side+':x'+t; }
+    else { t = pick(curbTs(seg)); off = type==='walk' ? RW+4 : type==='dbl' ? 20 : 46; key = segs.indexOf(seg)+':'+side+':'+t; }
+    if (used.has(key)) continue;
+    const p = spotPos(seg, side, t, off);
+    if (Math.random()<.5) p.h += Math.PI;
+    const car = {...p, color:pick(CAR_COLORS), viol:true, label:LABELS[type], state:'parked', prog:0, rolled:false};
+    if (banned(car) || overlaps(car, cars)) continue;
+    let partner = null;
+    if (type==='dbl'){
+      partner = {...spotPos(seg, side, t, 46), color:pick(CAR_COLORS), viol:false, state:'parked'};
+      if (Math.random()<.5) partner.h += Math.PI;
+      if (overlaps(partner, cars)) continue;
+    }
+    used.add(key); cars.push(car); if (partner) cars.push(partner);
+    if (type==='sign') signs.push({seg, side, t});
+  }
+  // знаки «стоянка запрещена» без нарушителей — для антуража
+  for (let k=0;k<5;k++){
+    const seg = pick(segs), side = Math.random()<.5?-1:1, t = pick(curbTs(seg)), key = segs.indexOf(seg)+':'+side+':'+t;
+    if (!used.has(key)){ used.add(key); signs.push({seg, side, t}); }
+  }
+  // правильно припаркованные машины
+  for (const seg of segs) for (const side of [-1,1]) for (const t of curbTs(seg)){
+    const key = segs.indexOf(seg)+':'+side+':'+t;
+    if (used.has(key) || Math.random() > .38) continue;
+    const car = {...spotPos(seg, side, t, 46), color:pick(CAR_COLORS), viol:false, state:'parked'};
+    if (Math.random()<.5) car.h += Math.PI;
+    if (banned(car) || overlaps(car, cars)) continue;
+    used.add(key); cars.push(car);
+  }
+  return {
+    n, cfg, cars, signs,
+    truck:{x:spawn.x, y:spawn.y, h:0, v:0, steer:0, load:null},
+    towed:0, escaped:0, owners:[], parts:[], floats:[], t:0, shake:0, running:true, done:false, slot:0
+  };
+}
+
+/* ---------- ввод ---------- */
+const keys = {up:false,down:false,left:false,right:false,act:false};
+const KEYMAP = {ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right',Space:'act'};
+addEventListener('keydown', e => {
+  if (KEYMAP[e.code]){ keys[KEYMAP[e.code]] = true; e.preventDefault(); }
+  if ((e.code==='Enter'||e.code==='Space') && !$('ov').hidden){ const b = $('ovBtns').querySelector('button'); if (b){ e.preventDefault(); b.click(); } }
+});
+addEventListener('keyup', e => { if (KEYMAP[e.code]){ keys[KEYMAP[e.code]] = false; e.preventDefault(); } });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+let touchMode = matchMedia('(pointer: coarse)').matches;
+if (touchMode) document.body.classList.add('touch');
+addEventListener('touchstart', () => { if (!touchMode){ touchMode = true; document.body.classList.add('touch'); } }, {once:true, passive:true});
+document.querySelectorAll('.k').forEach(b => {
+  const k = b.dataset.k;
+  const on = e => { e.preventDefault(); keys[k] = true; b.classList.add('on'); try{ b.setPointerCapture(e.pointerId); }catch(_){} };
+  const off = e => { keys[k] = false; b.classList.remove('on'); };
+  b.addEventListener('pointerdown', on);
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev => b.addEventListener(ev, off));
+  b.addEventListener('contextmenu', e => e.preventDefault());
+});
+
+/* ---------- физика ---------- */
+function truckCircles(t){
+  const dx=Math.cos(t.h), dy=Math.sin(t.h);
+  return [-28,0,28].map(o => ({x:t.x+dx*o, y:t.y+dy*o, r:15}));
+}
+const rearPoint = t => ({x:t.x-Math.cos(t.h)*46, y:t.y-Math.sin(t.h)*46});
+
+function resolve(t){
+  let hit = 0;
+  for (let iter=0; iter<3; iter++){
+    let px=0, py=0, n=0;
+    for (const c of truckCircles(t)){
+      for (const w of walls){
+        const qx = Math.max(w[0], Math.min(c.x, w[0]+w[2])), qy = Math.max(w[1], Math.min(c.y, w[1]+w[3]));
+        let dx = c.x-qx, dy = c.y-qy, d = Math.hypot(dx,dy);
+        if (d < c.r){
+          if (d < .001){ dx = c.x - (w[0]+w[2]/2); dy = c.y - (w[1]+w[3]/2); d = Math.hypot(dx,dy)||1; }
+          px += dx/d*(c.r-d+.1); py += dy/d*(c.r-d+.1); n++;
+        }
+      }
+      for (const car of S.cars){
+        if (car.state!=='parked' && car.state!=='loading') continue;
+        for (const q of carCircles(car)){
+          const dx=c.x-q.x, dy=c.y-q.y, d=Math.hypot(dx,dy)||.001, m=c.r+q.r;
+          if (d < m){ px += dx/d*(m-d+.1); py += dy/d*(m-d+.1); n++; }
+        }
+      }
+    }
+    if (!n) break;
+    t.x += px/n*1.6; t.y += py/n*1.6; hit = 1;
+  }
+  return hit;
+}
+
+function burst(x,y,col,n,sp=140){
+  for (let i=0;i<n;i++){ const a=Math.random()*Math.PI*2, v=sp*(.3+Math.random());
+    S.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:.7,max:.7,col}); }
+}
+function floatText(x,y,txt,col){ S.floats.push({x,y,txt,col,life:1.6}); }
+
+function nearestTarget(){
+  const t = S.truck, rp = rearPoint(t);
+  let best=null, bd=1e9;
+  for (const c of S.cars){
+    if (!c.viol || (c.state!=='parked' && c.state!=='loading')) continue;
+    const d = Math.hypot(c.x-rp.x, c.y-rp.y);
+    if (d < bd){ bd=d; best=c; }
+  }
+  return {car:best, d:bd};
+}
+
+function update(dt){
+  S.t += dt;
+  S.parts = S.parts.filter(p => (p.life-=dt) > 0);
+  for (const p of S.parts){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=.93; p.vy*=.93; }
+  S.floats = S.floats.filter(f => (f.life-=dt) > 0);
+  for (const f of S.floats) f.y -= 22*dt;
+  S.shake = Math.max(0, S.shake-dt);
+  for (const c of S.cars) if (c.state==='escaping'){ c.fade -= dt; c.x += Math.cos(c.h)*90*dt; c.y += Math.sin(c.h)*90*dt; if (c.fade<=0) c.state='escaped'; }
+  if (!S.running) return;
+
+  const t = S.truck;
+  // газ / тормоз / задний ход
+  const MAXF=250, MAXR=110;
+  if (keys.up){ t.v += (t.v<0 ? 520 : 240)*dt; }
+  else if (keys.down){ t.v -= (t.v>0 ? 520 : 180)*dt; }
+  else { t.v -= t.v*1.8*dt; if (Math.abs(t.v)<4) t.v=0; }
+  t.v = Math.max(-MAXR, Math.min(MAXF, t.v));
+  const want = (keys.right?1:0) - (keys.left?1:0);
+  t.steer += (want - t.steer) * Math.min(1, dt*9);
+  t.h += t.steer * 2.4 * Math.max(-1, Math.min(1, t.v/110)) * dt;
+  t.x += Math.cos(t.h)*t.v*dt; t.y += Math.sin(t.h)*t.v*dt;
+  if (resolve(t)){
+    if (Math.abs(t.v) > 70){ S.shake = .25; const fp = {x:t.x+Math.cos(t.h)*Math.sign(t.v)*44, y:t.y+Math.sin(t.h)*Math.sign(t.v)*44}; burst(fp.x,fp.y,'#f3f1ea',10,120); }
+    t.v *= -.25;
+  }
+
+  // погрузка
+  if (!t.load){
+    const {car, d} = nearestTarget();
+    for (const c of S.cars) if (c.viol && c.state==='loading' && c!==car){ c.state='parked'; c.prog=0; }
+    if (car){
+      const inRange = d < 54;
+      if (inRange && keys.act && Math.abs(t.v) < 25){
+        if (car.state==='parked'){ car.state='loading'; }
+        car.prog += dt;
+        if (!car.rolled){
+          car.rolled = true;
+          if (Math.random() < S.cfg.ownerChance) spawnOwner(car);
+        }
+        if (car.prog >= LOAD_TIME){
+          car.state='onTruck'; t.load = car; burst(car.x,car.y,'#f2a516',16);
+          floatText(car.x, car.y-30, 'Погружено!', '#f2a516');
+        }
+      } else if (car.state==='loading'){
+        car.prog = inRange ? Math.max(0, car.prog - dt*0.8) : 0;
+        if (car.prog<=0){ car.prog=0; car.state='parked'; }
+      }
+    }
+  } else {
+    // выгрузка на штрафстоянке
+    if (t.x > Y.x+20 && t.x < Y.x+Y.w-20 && t.y > Y.y+20 && t.y < Y.y+Y.h-20 && Math.abs(t.v) < 70){
+      const c = t.load, s = yardSlots[S.slot++ % yardSlots.length];
+      Object.assign(c, {x:s.x, y:s.y, h:s.h, state:'towed'});
+      t.load = null; S.towed++;
+      burst(t.x,t.y,'#3ccf7e',30,200); floatText(t.x, t.y-40, '+1 эвакуирована', '#3ccf7e');
+    }
+  }
+
+  // владельцы
+  for (const o of S.owners){
+    o.t += dt;
+    if (o.state==='run'){
+      const c = o.car;
+      if (c.state==='onTruck' || c.state==='towed'){ o.state='angry'; o.t=0; continue; }
+      const dx=c.x-o.x, dy=c.y-o.y, d=Math.hypot(dx,dy);
+      if (d < 16){
+        c.state='escaping'; c.fade=1.2; c.prog=0; o.state='gone'; S.escaped++;
+        floatText(c.x, c.y-30, 'Владелец успел!', '#e8414b');
+      } else { o.x += dx/d*o.sp*dt; o.y += dy/d*o.sp*dt; o.dir = Math.atan2(dy,dx); }
+    } else if (o.state==='angry' && o.t > 2.5) o.state='gone';
+  }
+  S.owners = S.owners.filter(o => o.state!=='gone');
+
+  // конец уровня
+  const pending = S.cars.filter(c => c.viol && ['parked','loading','onTruck'].includes(c.state)).length;
+  if (!pending && !S.done){ S.done = true; setTimeout(endLevel, 900); }
+}
+
+function spawnOwner(car){
+  const a = Math.random()*Math.PI*2, dist = 230 + Math.random()*80;
+  const x = Math.max(80, Math.min(WW-80, car.x + Math.cos(a)*dist)), y = Math.max(80, Math.min(WH-80, car.y + Math.sin(a)*dist));
+  const d = Math.hypot(car.x-x, car.y-y), arrive = 4.2 + Math.random()*4;
+  S.owners.push({x, y, car, sp:d/arrive, state:'run', t:0, dir:0, col:pick(['#4a7bd1','#d14a8b','#3aa36b','#9a5bd1'])});
+}
+
+/* ---------- рисование ---------- */
+let W=0,H=0,dpr=1,zoom=1,camX=0,camY=0;
+function resize(){
+  dpr = Math.min(devicePixelRatio||1, 2);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  zoom = Math.max(.5, Math.min(1.2, Math.min(W,H)/620));
+}
+addEventListener('resize', resize); resize();
+
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x,y,w,h,r) : ctx.rect(x,y,w,h); }
+
+function drawCity(){
+  ctx.fillStyle = '#7d9a6a'; ctx.fillRect(0,0,WW,WH);
+  ctx.fillStyle = '#bdb8ac'; ctx.fillRect(68,68,WW-136,WH-136);
+  ctx.fillStyle = '#3d4149';
+  for (const x of VX) ctx.fillRect(x-RW, 90, RW*2, WH-180);
+  for (const y of HY) ctx.fillRect(90, y-RW, WW-180, RW*2);
+  // разметка
+  ctx.strokeStyle = 'rgba(240,236,224,.7)'; ctx.lineWidth = 3; ctx.setLineDash([22,18]);
+  for (const s of segs){ ctx.beginPath();
+    if (s.o==='v'){ ctx.moveTo(s.c, s.a0+30); ctx.lineTo(s.c, s.a1-30); } else { ctx.moveTo(s.a0+30, s.c); ctx.lineTo(s.a1-30, s.c); }
+    ctx.stroke(); }
+  ctx.setLineDash([]);
+  // пешеходные переходы
+  ctx.fillStyle = 'rgba(245,242,232,.85)';
+  for (const s of segs){
+    for (const end of [s.a0, s.a1-24]){
+      for (let k=-RW+6; k<RW-6; k+=14){
+        if (s.o==='v') ctx.fillRect(s.c+k, end, 8, 24); else ctx.fillRect(end, s.c+k, 24, 8);
+      }
+    }
+  }
+  // запрещающие знаки: жёлтый бордюр + знак
+  for (const g of S.signs){
+    const s=g.seg, half=30, curb = RW-2;
+    ctx.fillStyle = '#f2c230';
+    if (s.o==='v') ctx.fillRect(s.c+g.side*curb-2, g.t-half, 4, half*2); else ctx.fillRect(g.t-half, s.c+g.side*curb-2, half*2, 4);
+    const p = spotPos(s, g.side, g.t, RW+12);
+    ctx.fillStyle = '#2a5bb8'; ctx.beginPath(); ctx.arc(p.x,p.y,8,0,7); ctx.fill();
+    ctx.strokeStyle = '#d6282f'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p.x-5,p.y-5); ctx.lineTo(p.x+5,p.y+5); ctx.stroke();
+  }
+  // кварталы
+  for (const b of blocks){
+    if (b.kind==='house'){
+      for (const r of b.roofs){
+        ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(r.x+6, r.y+6, r.w, r.h);
+        ctx.fillStyle = r.c; ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 3; ctx.strokeRect(r.x+1.5, r.y+1.5, r.w-3, r.h-3);
+        ctx.fillStyle = 'rgba(0,0,0,.12)';
+        ctx.fillRect(r.x+r.w*.2, r.y+r.h*.25, 16, 16); ctx.fillRect(r.x+r.w*.65, r.y+r.h*.6, 22, 12);
+      }
+    } else if (b.kind==='park'){
+      ctx.fillStyle = '#6f9a5c'; ctx.fillRect(b.in.x,b.in.y,b.in.w,b.in.h);
+      ctx.strokeStyle = '#d9cfb4'; ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(b.in.x, b.in.y+b.in.h/2); ctx.quadraticCurveTo(b.in.x+b.in.w/2, b.in.y+20, b.in.x+b.in.w, b.in.y+b.in.h/2); ctx.stroke();
+      for (const tr of b.trees){ ctx.fillStyle='rgba(0,0,0,.18)'; ctx.beginPath(); ctx.arc(tr.x+4,tr.y+4,tr.r,0,7); ctx.fill();
+        ctx.fillStyle='#4f7f43'; ctx.beginPath(); ctx.arc(tr.x,tr.y,tr.r,0,7); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.08)'; ctx.beginPath(); ctx.arc(tr.x-tr.r*.3,tr.y-tr.r*.3,tr.r*.5,0,7); ctx.fill(); }
+    }
+  }
+  // штрафстоянка
+  const loaded = !!S.truck.load;
+  ctx.fillStyle = '#50555e'; ctx.fillRect(Y.x,Y.y,Y.w,Y.h);
+  if (loaded){ ctx.fillStyle = `rgba(60,207,126,${.18+.12*Math.sin(S.t*5)})`; ctx.fillRect(Y.x,Y.y,Y.w,Y.h); }
+  ctx.strokeStyle = 'rgba(240,236,224,.5)'; ctx.lineWidth = 2;
+  for (const s of yardSlots){ ctx.strokeRect(s.x-17, s.y-30, 34, 60); }
+  ctx.save(); ctx.translate(Y.x+Y.w/2, Y.y+Y.h/2);
+  ctx.fillStyle = 'rgba(240,236,224,.55)'; ctx.font = '600 22px Unbounded, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('ШТРАФ', 0, -14); ctx.fillText('СТОЯНКА', 0, 14); ctx.restore();
+  ctx.fillStyle = '#c9ccd2';
+  for (const w of walls.slice(-5)) ctx.fillRect(w[0],w[1],w[2],w[3]);
+  ctx.fillStyle = '#e8414b'; ctx.fillRect(Y.x+Y.w-FT-2, GATE[0]-6, 10, 6); ctx.fillRect(Y.x+Y.w-FT-2, GATE[1], 10, 6);
+}
+
+function drawCar(c, alpha=1){
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(c.x,c.y); ctx.rotate(c.h);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; rr(-24,-10,50,26,6); ctx.fill();
+  ctx.fillStyle = c.color; rr(-25,-12,50,24,6); ctx.fill();
+  ctx.fillStyle = 'rgba(25,32,45,.82)'; rr(5,-10,10,20,3); ctx.fill(); rr(-17,-9,7,18,2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.14)'; rr(-10,-9,15,18,3); ctx.fill();
+  ctx.fillStyle = '#fff6c8'; ctx.fillRect(22,-10,3,5); ctx.fillRect(22,5,3,5);
+  ctx.fillStyle = '#b3262d'; ctx.fillRect(-25,-10,2,5); ctx.fillRect(-25,5,2,5);
+  ctx.restore();
+}
+
+function drawViolGlow(c){
+  const pulse = .55 + .45*Math.sin(S.t*6);
+  ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.h);
+  ctx.shadowColor = '#ff2b38'; ctx.shadowBlur = 22*pulse+6;
+  ctx.strokeStyle = `rgba(255,59,70,${.6+.4*pulse})`; ctx.lineWidth = 3.5; rr(-29,-16,58,32,9); ctx.stroke();
+  ctx.restore();
+}
+
+function drawLabel(x,y,txt,bg,fg){
+  ctx.save(); ctx.translate(x,y); ctx.scale(1/zoom,1/zoom);
+  ctx.font = '600 12px Rubik, sans-serif'; const w = ctx.measureText(txt).width + 14;
+  ctx.fillStyle = bg; rr(-w/2,-10,w,20,10); ctx.fill();
+  ctx.fillStyle = fg; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(txt,0,1);
+  ctx.restore();
+}
+
+function drawTruck(t){
+  ctx.save(); ctx.translate(t.x,t.y); ctx.rotate(t.h);
+  ctx.fillStyle = 'rgba(0,0,0,.28)'; rr(-42,-13,90,32,6); ctx.fill();
+  // колёса
+  ctx.fillStyle = '#16181c';
+  for (const wx of [-32,-18,26]) { ctx.fillRect(wx-6,-17,12,5); ctx.fillRect(wx-6,12,12,5); }
+  // платформа
+  ctx.fillStyle = '#7b828d'; rr(-44,-15,62,30,3); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5;
+  for (let k=-38;k<14;k+=8){ ctx.beginPath(); ctx.moveTo(k,-13); ctx.lineTo(k,13); ctx.stroke(); }
+  ctx.fillStyle = '#f2a516'; ctx.fillRect(-46,-15,4,30);
+  ctx.fillStyle = '#1f2328'; for (let k=-15;k<15;k+=8) ctx.fillRect(-46,k,4,4);
+  ctx.restore();
+  if (t.load){ const c = t.load; c.x = t.x - Math.cos(t.h)*14; c.y = t.y - Math.sin(t.h)*14; c.h = t.h; drawCar(c); }
+  ctx.save(); ctx.translate(t.x,t.y); ctx.rotate(t.h);
+  // кабина
+  ctx.fillStyle = '#f2a516'; rr(18,-15,27,30,6); ctx.fill();
+  ctx.fillStyle = 'rgba(25,32,45,.85)'; rr(33,-12,8,24,3); ctx.fill();
+  ctx.fillStyle = '#d98f0b'; ctx.fillRect(20,-13,11,26);
+  // мигалка
+  const on = Math.sin(S.t*14) > 0;
+  ctx.fillStyle = on ? '#ffb020' : '#7a4a00'; ctx.fillRect(22,-11,6,9);
+  ctx.fillStyle = on ? '#7a4a00' : '#ffb020'; ctx.fillRect(22,2,6,9);
+  if (on){ ctx.fillStyle = 'rgba(255,176,32,.18)'; ctx.beginPath(); ctx.arc(25,-6,26,0,7); ctx.fill(); }
+  ctx.fillStyle = '#fff6c8'; ctx.fillRect(43,-12,3,6); ctx.fillRect(43,6,3,6);
+  ctx.restore();
+}
+
+function drawOwner(o){
+  ctx.save(); ctx.translate(o.x,o.y);
+  const bob = o.state==='run' ? Math.sin(o.t*18)*2.2 : 0;
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2,3,9,7,0,0,7); ctx.fill();
+  ctx.rotate(o.dir);
+  ctx.fillStyle = '#2a2d33'; ctx.fillRect(-3+bob,-6,6,4); ctx.fillRect(-3-bob,2,6,4);
+  ctx.fillStyle = o.col; ctx.beginPath(); ctx.ellipse(0,0,6,9,0,0,7); ctx.fill();
+  ctx.fillStyle = '#e7c3a0'; ctx.beginPath(); ctx.arc(1,0,4.5,0,7); ctx.fill();
+  ctx.fillStyle = '#3b2a20'; ctx.beginPath(); ctx.arc(-.5,0,4.5,Math.PI*.5,Math.PI*1.5); ctx.fill();
+  ctx.restore();
+  drawLabel(o.x, o.y-22, o.state==='run' ? '! Это моя машина!' : 'Эх…', o.state==='run' ? '#e8414b' : '#323845', '#fff');
+}
+
+function worldToScreen(x,y){ return {x:(x-camX)*zoom + W/2, y:(y-camY)*zoom + H/2}; }
+
+function drawArrow(tx,ty,col){
+  const p = worldToScreen(tx,ty), m = 46;
+  if (p.x>m && p.x<W-m && p.y>m+70 && p.y<H-m-(touchMode?170:60)) return;
+  const cx=W/2, cy=H/2, a=Math.atan2(p.y-cy, p.x-cx);
+  const top=90, bot=H-(touchMode?190:70), lft=30, rgt=W-30;
+  let k = Infinity;
+  if (Math.cos(a)>0) k=Math.min(k,(rgt-cx)/Math.cos(a)); if (Math.cos(a)<0) k=Math.min(k,(lft-cx)/Math.cos(a));
+  if (Math.sin(a)>0) k=Math.min(k,(bot-cy)/Math.sin(a)); if (Math.sin(a)<0) k=Math.min(k,(top-cy)/Math.sin(a));
+  const x=cx+Math.cos(a)*k, y=cy+Math.sin(a)*k;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(a);
+  ctx.fillStyle = col; ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(16,0); ctx.lineTo(-10,-12); ctx.lineTo(-4,0); ctx.lineTo(-10,12); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+function draw(){
+  const t = S.truck;
+  const lx = t.x + Math.cos(t.h)*t.v*.35, ly = t.y + Math.sin(t.h)*t.v*.35;
+  camX += (lx-camX)*.12; camY += (ly-camY)*.12;
+  const hw = W/2/zoom, hh = H/2/zoom;
+  camX = hw*2 >= WW ? WW/2 : Math.max(hw, Math.min(WW-hw, camX));
+  camY = hh*2 >= WH ? WH/2 : Math.max(hh, Math.min(WH-hh, camY));
+  let sx=0, sy=0; if (S.shake){ sx=(Math.random()-.5)*S.shake*30; sy=(Math.random()-.5)*S.shake*30; }
+
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle = '#2c3038'; ctx.fillRect(0,0,W,H);
+  ctx.setTransform(dpr*zoom,0,0,dpr*zoom, dpr*(W/2 - camX*zoom + sx), dpr*(H/2 - camY*zoom + sy));
+  drawCity();
+
+  for (const c of S.cars){
+    if (c.state==='onTruck' || c.state==='escaped') continue;
+    if (c.state==='escaping'){ drawCar(c, Math.max(0,c.fade/1.2)); continue; }
+    if (c.viol && (c.state==='parked'||c.state==='loading')) drawViolGlow(c);
+    drawCar(c);
+  }
+  // зона подцепа и прогресс
+  if (!t.load){
+    const {car, d} = nearestTarget();
+    if (car && d < 140){
+      const rp = rearPoint(t);
+      ctx.strokeStyle = d<54 ? 'rgba(242,165,22,.9)' : 'rgba(242,165,22,.35)'; ctx.lineWidth = 2; ctx.setLineDash([5,5]);
+      ctx.beginPath(); ctx.moveTo(rp.x,rp.y); ctx.lineTo(car.x,car.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+    for (const c of S.cars) if (c.viol && c.state==='loading'){
+      const f = c.prog/LOAD_TIME;
+      ctx.lineWidth = 6; ctx.strokeStyle='rgba(0,0,0,.45)'; ctx.beginPath(); ctx.arc(c.x,c.y,34,0,7); ctx.stroke();
+      ctx.strokeStyle='#f2a516'; ctx.beginPath(); ctx.arc(c.x,c.y,34,-Math.PI/2,-Math.PI/2+f*Math.PI*2); ctx.stroke();
+      drawLabel(c.x, c.y-50, `Погрузка ${(LOAD_TIME-c.prog).toFixed(1)} с`, '#f2a516', '#1b1d22');
+    }
+  }
+  drawTruck(t);
+  for (const o of S.owners) drawOwner(o);
+  for (const c of S.cars) if (c.viol && c.state==='parked' && !S.cars.some(o=>o.state==='loading')){
+    const p = worldToScreen(c.x,c.y);
+    if (p.x>-50 && p.x<W+50 && p.y>-50 && p.y<H+50) drawLabel(c.x, c.y-30, c.label, '#e8414b', '#fff');
+  }
+  for (const p of S.parts){ ctx.globalAlpha = p.life/p.max; ctx.fillStyle = p.col; ctx.fillRect(p.x-2.5,p.y-2.5,5,5); }
+  ctx.globalAlpha = 1;
+  for (const f of S.floats){ ctx.globalAlpha = Math.min(1, f.life); drawLabel(f.x, f.y, f.txt, f.col, '#14171c'); }
+  ctx.globalAlpha = 1;
+
+  // стрелки к цели
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if (S.running){
+    if (t.load) drawArrow(Y.x+Y.w/2, Y.y+Y.h/2, '#3ccf7e');
+    else { const {car} = nearestTarget(); if (car) drawArrow(car.x, car.y, '#e8414b'); }
+  }
+}
+
+/* ---------- HUD и экраны ---------- */
+let lastHud = '';
+function hud(){
+  const viol = S.cars.filter(c=>c.viol);
+  const dots = viol.map(c => c.state==='towed' ? 't' : (c.state==='escaping'||c.state==='escaped') ? 'e' : 'p').sort((a,b)=>'tep'.indexOf(a)-'tep'.indexOf(b));
+  const t = S.truck, {car, d} = nearestTarget();
+  let hint, cls='';
+  const act = touchMode ? 'кнопку «Эвакуация»' : 'ПРОБЕЛ';
+  if (S.owners.some(o=>o.state==='run')){ hint = 'Владелец бежит к машине! Не отпускай'; cls='warn'; }
+  else if (t.load) { hint = 'Вези машину на штрафстоянку — за зелёной стрелкой'; cls='ok'; }
+  else if (car && car.state==='loading') hint = 'Погрузка… держи ' + act;
+  else if (car && d < 54) hint = Math.abs(t.v) < 25 ? 'Держи ' + act + ' 5 секунд' : 'Остановись, чтобы начать погрузку';
+  else if (car && d < 140) hint = 'Подъезжай к машине задом, к платформе';
+  else hint = 'Найди машину с красной подсветкой — за красной стрелкой';
+  const key = [S.n, dots.join(''), S.towed, hint, cls].join('|');
+  if (key===lastHud) return; lastHud = key;
+  $('lvl').textContent = 'УРОВЕНЬ ' + S.n;
+  $('dots').innerHTML = dots.map(k => `<span class="dot ${k}">${k==='t'?'✓':k==='e'?'×':''}</span>`).join('');
+  $('need').innerHTML = `Эвакуировать: <b>${S.towed} / ${S.cfg.need}</b>` + (S.cfg.need < S.cfg.total ? ` <span class="small">из ${S.cfg.total}</span>` : '');
+  const h = $('hint'); h.textContent = hint; h.className = 'hint ' + cls;
+}
+
+function showOverlay(title, cls, html, buttons, small){
+  $('ovTitle').textContent = title; $('ovTitle').className = cls||'';
+  $('ovBody').innerHTML = html;
+  $('ovBtns').innerHTML = '';
+  buttons.forEach(([label, fn, sec]) => { const b = document.createElement('button'); b.className = 'main' + (sec?' sec':''); b.textContent = label; b.onclick = () => { if (!$('ov').hidden) fn(); }; $('ovBtns').appendChild(b); });
+  $('ovSmall').textContent = small||''; $('ovSmall').hidden = !small;
+  $('ov').hidden = false;
+}
+
+function startLevel(n){
+  S = genLevel(n); lastHud = '';
+  camX = S.truck.x; camY = S.truck.y;
+  for (const k in keys) keys[k] = false;
+  $('ov').hidden = true;
+  if (n > best){ best = n; $('best').textContent = best; }
+  try { localStorage.setItem('evak-level', n); localStorage.setItem('evak-best', best); } catch(e){}
+}
+
+function endLevel(){
+  S.running = false;
+  const ok = S.towed >= S.cfg.need;
+  const stat = `<p>Эвакуировано <b>${S.towed}</b> из ${S.cfg.total}` + (S.escaped ? `, уехали с владельцами: <b>${S.escaped}</b>` : '') + `. Нужно было ${S.cfg.need}.</p>`;
+  if (ok){
+    const next = levelCfg(S.n+1);
+    showOverlay('УРОВЕНЬ ' + S.n + ' ПРОЙДЕН', 'good', stat + `<p class="small" style="margin-top:10px">Дальше: ${next.total} нарушителей` + (next.ownerChance ? `, владельцы выбегают чаще` : '') + `.</p>`,
+      [['Следующий уровень', () => startLevel(S.n+1)], ['Ещё раз', () => startLevel(S.n), true]]);
+  } else {
+    showOverlay('НЕ ХВАТИЛО', 'bad', stat + `<p class="small" style="margin-top:10px">Начинай погрузку там, где владелец не успеет добежать, и не отпускай кнопку.</p>`,
+      [['Попробовать снова', () => startLevel(S.n)]]);
+  }
+}
+
+// стартовый экран: город на фоне
+S = genLevel(1); S.running = false; camX = S.truck.x; camY = S.truck.y;
+const startBtns = [['Начать с 1 уровня', () => startLevel(1)]];
+if (saved > 1) startBtns.unshift(['Продолжить: уровень ' + saved, () => startLevel(saved)]);
+showOverlay('ВАНЁК ЭВАКУИРУЕТ', '', $('ovBody').innerHTML, startBtns.map((b,i)=> i ? [...b, true] : b), 'На телефоне снизу появятся кнопки управления.');
+
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(.05, (now-last)/1000); last = now;
+  update(dt); draw(); hud();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
